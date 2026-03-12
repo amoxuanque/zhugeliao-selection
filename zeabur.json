@@ -1,0 +1,10 @@
+{
+  "build": {
+    "builder": "nodejs"
+  },
+  "serverless": {
+    "express": {
+      "src": "server.js"
+    }
+  }
+}

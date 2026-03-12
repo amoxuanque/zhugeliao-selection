@@ -1,0 +1,23 @@
+{
+  "name": "zhugeliao-selection",
+  "version": "1.0.0",
+  "description": "诸葛选品 - 小微卖家 3 个月回本计划生成器",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "ecommerce",
+    "selection",
+    "小微卖家"
+  ],
+  "author": "xue168861",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1"
+  }
+}
