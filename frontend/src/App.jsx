@@ -50,6 +50,31 @@ export default function App() {
     setLoading(false);
   };
 
+  // 获取行动清单
+  const handleStartPlan = async () => {
+    if (!selectedCategory) {
+      alert('请先选择品类');
+      return;
+    }
+    setLoading(true);
+    try {
+      const res = await fetch('/api/action-checklist', {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await res.json();
+      if (data.success) {
+        // 显示行动清单
+        const checklist = data.data;
+        alert(`✅ 为您准备了 4 周行动清单\n\n${checklist.map(w => `📅 ${w.week}周: ${w.tasks.join('、')}`).join('\n\n')}`);
+      }
+    } catch (err) {
+      console.error('获取行动清单失败:', err);
+      alert('获取行动清单失败');
+    }
+    setLoading(false);
+  };
+
   return (
     <div style={{ minHeight: '100vh', background: '#f9fafb', fontFamily: 'system-ui, -apple-system' }}>
       {/* Header */}
@@ -307,17 +332,19 @@ export default function App() {
                 ← 选择其他品类
               </button>
               <button
+                onClick={handleStartPlan}
+                disabled={loading}
                 style={{
                   padding: '12px',
-                  background: '#10b981',
+                  background: loading ? '#d1d5db' : '#10b981',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
-                  cursor: 'pointer',
+                  cursor: loading ? 'not-allowed' : 'pointer',
                   fontWeight: '600'
                 }}
               >
-                ✓ 开始执行计划
+                {loading ? '⏳ 生成中...' : '✓ 开始执行计划'}
               </button>
             </div>
           </div>
