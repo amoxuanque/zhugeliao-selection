@@ -328,6 +328,187 @@ const riskWarnings = {
   ]
 };
 
+// ---------------- P1: 数据底座 / Search / RPA / 评论分析 / 参数化模拟 ----------------
+
+const platformProducts = [
+  { id: 'tb-1001', platform: '淘宝', categoryId: 4, title: '免打孔家居收纳盒大容量', price: 29.9, estMonthlySales: 1800, rating: 4.7, shopLevel: '金牌', updatedAt: '2026-03-15' },
+  { id: 'tb-1002', platform: '淘宝', categoryId: 9, title: '宠物自动喂食器智能定时', price: 119, estMonthlySales: 620, rating: 4.6, shopLevel: '钻石', updatedAt: '2026-03-15' },
+  { id: 'tm-2001', platform: 'TEMU', categoryId: 8, title: '多功能厨房切菜神器', price: 12.8, estMonthlySales: 5300, rating: 4.5, shopLevel: 'A', updatedAt: '2026-03-14' },
+  { id: 'tm-2002', platform: 'TEMU', categoryId: 20, title: '日用洗护旅行装套装', price: 9.9, estMonthlySales: 4900, rating: 4.4, shopLevel: 'A', updatedAt: '2026-03-14' },
+  { id: '1688-3001', platform: '1688', categoryId: 1, title: '劳保鞋防砸防刺穿工作鞋', price: 38, estMonthlySales: 1100, rating: 4.8, shopLevel: '实力商家', updatedAt: '2026-03-16' },
+  { id: '1688-3002', platform: '1688', categoryId: 13, title: '工作服夏季透气工装套装', price: 46, estMonthlySales: 860, rating: 4.6, shopLevel: '实力商家', updatedAt: '2026-03-16' }
+];
+
+const productReviews = [
+  { productId: 'tb-1001', rating: 5, content: '收纳空间大，安装方便，物流也快', date: '2026-03-10' },
+  { productId: 'tb-1001', rating: 2, content: '塑料有味道，边缘有毛刺，客服回复慢', date: '2026-03-11' },
+  { productId: 'tb-1002', rating: 3, content: '功能可以，但偶尔卡粮，售后处理一般', date: '2026-03-12' },
+  { productId: 'tm-2001', rating: 4, content: '切菜很快，材质不错，清洗方便', date: '2026-03-12' },
+  { productId: 'tm-2001', rating: 2, content: '刀片不耐用，物流包装差，收到有划痕', date: '2026-03-13' },
+  { productId: '1688-3001', rating: 5, content: '质量稳定，尺码标准，复购率高', date: '2026-03-13' },
+  { productId: '1688-3001', rating: 3, content: '发货稍慢，价格还能再谈', date: '2026-03-14' }
+];
+
+const dataSnapshots = {
+  platform_products: {
+    total: platformProducts.length,
+    sourceCount: 3,
+    updatedAt: '2026-03-16T10:00:00Z',
+    freshnessHours: 24
+  },
+  product_reviews: {
+    total: productReviews.length,
+    sourceCount: 3,
+    updatedAt: '2026-03-16T10:00:00Z',
+    freshnessHours: 24
+  }
+};
+
+const rpaTasks = [];
+
+const sentimentLexicon = {
+  positive: ['质量', '稳定', '方便', '快', '复购', '不错'],
+  negative: ['卡', '慢', '差', '毛刺', '划痕', '味道', '不耐用']
+};
+
+const reviewThemes = {
+  quality: ['质量', '材质', '毛刺', '划痕', '不耐用'],
+  logistics: ['物流', '发货', '包装'],
+  service: ['客服', '售后'],
+  feature: ['功能', '安装', '清洗', '卡粮']
+};
+
+const scenarioMultipliers = {
+  conservative: [0.3, 0.5, 0.7],
+  normal: [0.5, 0.75, 1],
+  aggressive: [0.7, 1, 1.2]
+};
+
+function calcScenarioForecast(category, budget, scenario = 'normal', overrides = {}) {
+  const baseCostRates = {
+    supply: 0.6,
+    packaging: 0.05,
+    storage: 0.05,
+    logistics: 0.08,
+    marketing: 0.12,
+    platform: 0.05,
+    other: 0.05
+  };
+
+  const monthlyCosts = Object.fromEntries(
+    Object.entries(baseCostRates).map(([k, v]) => [k, budget * (overrides.costRates?.[k] ?? v)])
+  );
+  const totalMonthlyCost = Object.values(monthlyCosts).reduce((a, b) => a + b, 0);
+
+  const multipliers = scenarioMultipliers[scenario] || scenarioMultipliers.normal;
+  const supplyFloor = parseFloat(category.supplyCost.split('-')[0]);
+  const marginFloor = parseFloat(category.profitMargin.split('-')[0]) / 100;
+  const priceMultiplier = overrides.priceMultiplier ?? 1;
+  const cvrMultiplier = overrides.cvrMultiplier ?? 1;
+
+  let cumulative = 0;
+  const forecast = multipliers.map((m, idx) => {
+    const month = idx + 1;
+    const volume = Math.floor(category.newbieMonthlyTarget * m * cvrMultiplier);
+    const revenue = volume * ((supplyFloor * priceMultiplier) / (1 - marginFloor));
+    const variableCost = volume * supplyFloor;
+    const monthProfit = revenue - variableCost - (totalMonthlyCost / 3);
+    cumulative += monthProfit;
+
+    return {
+      month,
+      volume,
+      revenue: Math.round(revenue),
+      cost: Math.round(variableCost),
+      monthProfit: Math.round(monthProfit),
+      cumulativeProfit: Math.round(cumulative)
+    };
+  });
+
+  return {
+    monthlyCosts,
+    totalMonthlyCost: Math.round(totalMonthlyCost),
+    forecast
+  };
+}
+
+function analyzeReviewTexts(reviews) {
+  const themeCounter = Object.fromEntries(Object.keys(reviewThemes).map((k) => [k, 0]));
+  let positive = 0;
+  let negative = 0;
+
+  reviews.forEach((r) => {
+    const text = r.content || '';
+    sentimentLexicon.positive.forEach((w) => {
+      if (text.includes(w)) positive += 1;
+    });
+    sentimentLexicon.negative.forEach((w) => {
+      if (text.includes(w)) negative += 1;
+    });
+
+    Object.entries(reviewThemes).forEach(([theme, words]) => {
+      if (words.some((w) => text.includes(w))) {
+        themeCounter[theme] += 1;
+      }
+    });
+  });
+
+  const totalSignals = positive + negative || 1;
+  const sentiment = {
+    positiveScore: Number((positive / totalSignals).toFixed(2)),
+    negativeScore: Number((negative / totalSignals).toFixed(2))
+  };
+
+  const topThemes = Object.entries(themeCounter)
+    .sort((a, b) => b[1] - a[1])
+    .map(([theme, count]) => ({ theme, count }));
+
+  return { sentiment, topThemes, samples: reviews.slice(0, 5) };
+}
+
+function rerankSearchResults(items, query = '') {
+  const q = query.trim();
+  return items
+    .map((item) => {
+      const category = categoryLibrary.find((c) => c.id === item.categoryId);
+      const keywordScore = q && item.title.includes(q) ? 2 : 0;
+      const salesScore = Math.min(item.estMonthlySales / 1000, 6);
+      const ratingScore = item.rating;
+      const marginScore = category ? parseFloat(category.profitMargin.split('-')[0]) / 10 : 0;
+      const competitionPenalty = category?.riskLevel === 'red' ? -1 : 0;
+
+      const rerankScore = Number((keywordScore + salesScore + ratingScore + marginScore + competitionPenalty).toFixed(2));
+      return { ...item, rerankScore, categoryName: category?.name || '未知品类' };
+    })
+    .sort((a, b) => b.rerankScore - a.rerankScore);
+}
+
+function enqueueRpaTask(task) {
+  rpaTasks.push(task);
+  setTimeout(() => {
+    task.status = 'running';
+    task.attempts += 1;
+  }, 300);
+
+  setTimeout(() => {
+    const isFail = task.target.includes('fail') && task.attempts < task.maxRetries;
+    if (isFail) {
+      task.status = 'retrying';
+      task.error = '触发平台频控，已进入重试队列';
+      enqueueRpaTask(task);
+      return;
+    }
+
+    task.status = 'completed';
+    task.finishedAt = new Date().toISOString();
+    task.result = {
+      captured: Math.floor(100 + Math.random() * 200),
+      platform: task.platform,
+      target: task.target
+    };
+  }, 1200);
+}
+
 // API 端点
 
 // 获取所有品类
@@ -363,6 +544,93 @@ app.post('/api/categories/filter', (req, res) => {
   res.json({ success: true, data: filtered });
 });
 
+// 数据底座概览
+app.get('/api/data/snapshots', (req, res) => {
+  res.json({
+    success: true,
+    data: dataSnapshots,
+    schema: ['platform_products', 'product_reviews'],
+    description: 'P1 数据底座：原始商品与评论快照概览'
+  });
+});
+
+// Search + 重排
+app.post('/api/search/rerank', (req, res) => {
+  const { query = '', platform, categoryId, limit = 10 } = req.body || {};
+
+  let candidates = platformProducts;
+  if (platform) {
+    candidates = candidates.filter((p) => p.platform === platform);
+  }
+  if (categoryId) {
+    candidates = candidates.filter((p) => p.categoryId === Number(categoryId));
+  }
+
+  const ranked = rerankSearchResults(candidates, query).slice(0, Number(limit));
+  res.json({
+    success: true,
+    query,
+    count: ranked.length,
+    data: ranked,
+    factors: ['keywordScore', 'salesScore', 'ratingScore', 'marginScore', 'competitionPenalty']
+  });
+});
+
+// 评论主题分析
+app.post('/api/reviews/analyze', (req, res) => {
+  const { productId, categoryId, platform } = req.body || {};
+
+  let scopedProducts = platformProducts;
+  if (platform) scopedProducts = scopedProducts.filter((p) => p.platform === platform);
+  if (categoryId) scopedProducts = scopedProducts.filter((p) => p.categoryId === Number(categoryId));
+  if (productId) scopedProducts = scopedProducts.filter((p) => p.id === productId);
+
+  const productIds = new Set(scopedProducts.map((p) => p.id));
+  const reviews = productReviews.filter((r) => productIds.has(r.productId));
+
+  const analysis = analyzeReviewTexts(reviews);
+  res.json({
+    success: true,
+    scope: { productId, categoryId, platform },
+    reviewCount: reviews.length,
+    data: analysis
+  });
+});
+
+// RPA 编排：创建任务
+app.post('/api/rpa/tasks', (req, res) => {
+  const { platform = '淘宝', target = '榜单抓取', maxRetries = 2 } = req.body || {};
+  const task = {
+    id: `task_${Date.now()}`,
+    platform,
+    target,
+    status: 'queued',
+    attempts: 0,
+    maxRetries,
+    createdAt: new Date().toISOString(),
+    finishedAt: null,
+    error: null,
+    result: null
+  };
+  enqueueRpaTask(task);
+  res.status(202).json({ success: true, data: task });
+});
+
+// RPA 编排：任务列表
+app.get('/api/rpa/tasks', (req, res) => {
+  const sorted = [...rpaTasks].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+  res.json({ success: true, count: sorted.length, data: sorted.slice(0, 50) });
+});
+
+// RPA 编排：单任务查询
+app.get('/api/rpa/tasks/:id', (req, res) => {
+  const task = rpaTasks.find((t) => t.id === req.params.id);
+  if (!task) {
+    return res.status(404).json({ success: false, error: '任务不存在' });
+  }
+  res.json({ success: true, data: task });
+});
+
 // 财务预测计算
 app.post('/api/financial-forecast', (req, res) => {
   const { categoryId, budget, scenario } = req.body;
@@ -372,67 +640,12 @@ app.post('/api/financial-forecast', (req, res) => {
     return res.status(404).json({ success: false, error: '品类不存在' });
   }
 
-  // 成本拆解
-  const monthlyCosts = {
-    supply: budget * 0.6,      // 采购 60%
-    packaging: budget * 0.05,  // 包装 5%
-    storage: budget * 0.05,    // 仓储 5%
-    logistics: budget * 0.08,  // 物流 8%
-    marketing: budget * 0.12,  // 推广 12%
-    platform: budget * 0.05,   // 平台费 5%
-    other: budget * 0.05       // 其他风险 5%
+  const simulation = calcScenarioForecast(category, Number(budget), scenario);
+  const confidenceMap = {
+    conservative: '±25%',
+    normal: '±15%',
+    aggressive: '±30%'
   };
-
-  const totalMonthlyCost = Object.values(monthlyCosts).reduce((a, b) => a + b, 0);
-
-  // 销量预测（三个场景）
-  const scenarios = {
-    conservative: {
-      months: [
-        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.3), scenario: '保守' },
-        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 0.5), scenario: '保守' },
-        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 0.7), scenario: '保守' }
-      ],
-      confidence: '±25%'
-    },
-    normal: {
-      months: [
-        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.5), scenario: '正常' },
-        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 0.75), scenario: '正常' },
-        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 1.0), scenario: '正常' }
-      ],
-      confidence: '±15%'
-    },
-    aggressive: {
-      months: [
-        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.7), scenario: '激进' },
-        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 1.0), scenario: '激进' },
-        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 1.2), scenario: '激进' }
-      ],
-      confidence: '±30%'
-    }
-  };
-
-  const selectedScenario = scenarios[scenario] || scenarios.normal;
-
-  // 计算收入和利润
-  const supplyPrice = parseFloat(category.supplyCost.split('-')[0]);
-  const profitMargin = parseFloat(category.profitMargin.split('-')[0]) / 100;
-
-  const forecast = selectedScenario.months.map(m => {
-    const revenue = m.volume * (supplyPrice / (1 - profitMargin));
-    const cost = m.volume * supplyPrice;
-    const profit = revenue - cost - (totalMonthlyCost / 3);
-
-    return {
-      month: m.month,
-      volume: m.volume,
-      revenue: Math.round(revenue),
-      cost: Math.round(cost),
-      monthProfit: Math.round(profit),
-      cumulativeProfit: Math.round(profit * m.month)
-    };
-  });
 
   res.json({
     success: true,
@@ -440,11 +653,61 @@ app.post('/api/financial-forecast', (req, res) => {
       categoryName: category.name,
       budget: budget,
       scenario: scenario,
-      costs: monthlyCosts,
-      totalMonthlyCost: Math.round(totalMonthlyCost),
-      forecast: forecast,
-      confidence: selectedScenario.confidence,
+      costs: simulation.monthlyCosts,
+      totalMonthlyCost: simulation.totalMonthlyCost,
+      forecast: simulation.forecast,
+      confidence: confidenceMap[scenario] || confidenceMap.normal,
       successProbability: category.riskLevel === 'green' ? '70-80%' : category.riskLevel === 'yellow' ? '40-60%' : '20-40%'
+    }
+  });
+});
+
+// 参数化财务模拟（P10/P50/P90）
+app.post('/api/forecast/simulate', (req, res) => {
+  const {
+    categoryId,
+    budget,
+    scenario = 'normal',
+    assumptions = {}
+  } = req.body || {};
+
+  const category = categoryLibrary.find((c) => c.id === Number(categoryId));
+  if (!category) {
+    return res.status(404).json({ success: false, error: '品类不存在' });
+  }
+  if (!budget || Number(budget) <= 0) {
+    return res.status(400).json({ success: false, error: '预算必须大于 0' });
+  }
+
+  const p10 = calcScenarioForecast(category, Number(budget), scenario, {
+    priceMultiplier: assumptions.priceMultiplierP10 ?? 0.92,
+    cvrMultiplier: assumptions.cvrMultiplierP10 ?? 0.85,
+    costRates: assumptions.costRatesP10
+  });
+  const p50 = calcScenarioForecast(category, Number(budget), scenario, {
+    priceMultiplier: assumptions.priceMultiplierP50 ?? 1,
+    cvrMultiplier: assumptions.cvrMultiplierP50 ?? 1,
+    costRates: assumptions.costRatesP50
+  });
+  const p90 = calcScenarioForecast(category, Number(budget), scenario, {
+    priceMultiplier: assumptions.priceMultiplierP90 ?? 1.08,
+    cvrMultiplier: assumptions.cvrMultiplierP90 ?? 1.15,
+    costRates: assumptions.costRatesP90
+  });
+
+  res.json({
+    success: true,
+    data: {
+      categoryId: category.id,
+      categoryName: category.name,
+      budget: Number(budget),
+      scenario,
+      assumptionsApplied: {
+        p10: { priceMultiplier: assumptions.priceMultiplierP10 ?? 0.92, cvrMultiplier: assumptions.cvrMultiplierP10 ?? 0.85 },
+        p50: { priceMultiplier: assumptions.priceMultiplierP50 ?? 1, cvrMultiplier: assumptions.cvrMultiplierP50 ?? 1 },
+        p90: { priceMultiplier: assumptions.priceMultiplierP90 ?? 1.08, cvrMultiplier: assumptions.cvrMultiplierP90 ?? 1.15 }
+      },
+      distributions: { p10, p50, p90 }
     }
   });
 });

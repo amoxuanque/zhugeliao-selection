@@ -4,39 +4,64 @@ export default function App() {
   const [step, setStep] = useState(1);
   const [budget, setBudget] = useState(15000);
   const [channel, setChannel] = useState('1688');
+  const [riskFilter, setRiskFilter] = useState('all');
   const [categories, setCategories] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState(null);
   const [scenario, setScenario] = useState('normal');
   const [forecast, setForecast] = useState(null);
+  const [checklist, setChecklist] = useState([]);
+  const [showChecklist, setShowChecklist] = useState(false);
   const [loading, setLoading] = useState(false);
 
-  // 获取品类库
-  useEffect(() => {
-    fetch('/api/categories')
-      .then(res => res.json())
-      .then(data => setCategories(data.data || []))
-      .catch(err => console.error('获取品类失败:', err));
-  }, []);
+  const loadCategories = async () => {
+    try {
+      if (step !== 2) {
+        return;
+      }
+      const shouldFilter = riskFilter !== 'all' || channel !== '多渠道';
+      const endpoint = shouldFilter ? '/api/categories/filter' : '/api/categories';
+      const options = shouldFilter
+        ? {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              riskLevel: riskFilter === 'all' ? undefined : riskFilter,
+              channel: channel === '多渠道' ? undefined : channel
+            })
+          }
+        : { method: 'GET' };
 
-  // 处理预算输入
-  const handleBudgetChange = (e) => {
-    setBudget(parseInt(e.target.value) || 10000);
+      const res = await fetch(endpoint, options);
+      const data = await res.json();
+      setCategories(data.data || []);
+    } catch (err) {
+      console.error('获取品类失败:', err);
+    }
   };
 
-  // 选择品类
+  useEffect(() => {
+    loadCategories();
+  }, [step, channel, riskFilter]);
+
+  const handleBudgetChange = (e) => {
+    setBudget(parseInt(e.target.value, 10) || 10000);
+  };
+
   const handleSelectCategory = (category) => {
     setSelectedCategory(category);
-    generateForecast(category.id);
+    setStep(3);
   };
 
-  // 生成财务预测
-  const generateForecast = async (categoryId) => {
+  const generateForecast = async () => {
+    if (!selectedCategory) {
+      return;
+    }
     setLoading(true);
     try {
       const res = await fetch('/api/financial-forecast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryId, budget, scenario })
+        body: JSON.stringify({ categoryId: selectedCategory.id, budget, scenario })
       });
       const data = await res.json();
       if (data.success) {
@@ -45,39 +70,34 @@ export default function App() {
       }
     } catch (err) {
       console.error('生成预测失败:', err);
-      alert('生成预测失败');
     }
     setLoading(false);
   };
 
-  // 获取行动清单
   const handleStartPlan = async () => {
     if (!selectedCategory) {
-      alert('请先选择品类');
       return;
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/action-checklist', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
-      });
+      const res = await fetch('/api/action-checklist');
       const data = await res.json();
       if (data.success) {
-        // 显示行动清单
-        const checklist = data.data;
-        alert(`✅ 为您准备了 4 周行动清单\n\n${checklist.map(w => `📅 ${w.week}周: ${w.tasks.join('、')}`).join('\n\n')}`);
+        const normalized = (data.data || []).map((w) => ({
+          ...w,
+          items: w.items || w.tasks || []
+        }));
+        setChecklist(normalized);
+        setShowChecklist(true);
       }
     } catch (err) {
       console.error('获取行动清单失败:', err);
-      alert('获取行动清单失败');
     }
     setLoading(false);
   };
 
   return (
     <div style={{ minHeight: '100vh', background: '#f9fafb', fontFamily: 'system-ui, -apple-system' }}>
-      {/* Header */}
       <header style={{ background: 'linear-gradient(135deg, #10b981, #059669)', padding: '24px', color: 'white' }}>
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           <h1 style={{ margin: '0 0 8px 0', fontSize: '28px', fontWeight: 'bold' }}>诸葛选品</h1>
@@ -85,10 +105,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Content */}
       <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
-
-        {/* Step 1: 预算配置 */}
         {step === 1 && (
           <div style={{ background: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <h2 style={{ marginTop: 0 }}>步骤 1: 配置预算</h2>
@@ -102,13 +119,7 @@ export default function App() {
                 min="5000"
                 max="50000"
                 step="1000"
-                style={{
-                  width: '100%',
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  borderRadius: '8px',
-                  fontSize: '16px'
-                }}
+                style={{ width: '100%', padding: '12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '16px' }}
               />
               <p style={{ fontSize: '12px', color: '#6b7280', margin: '8px 0 0 0' }}>建议 1-2 万元</p>
             </div>
@@ -138,28 +149,43 @@ export default function App() {
 
             <button
               onClick={() => setStep(2)}
-              style={{
-                width: '100%',
-                padding: '12px',
-                background: '#10b981',
-                color: 'white',
-                border: 'none',
-                borderRadius: '8px',
-                fontSize: '16px',
-                fontWeight: '600',
-                cursor: 'pointer'
-              }}
+              style={{ width: '100%', padding: '12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: '600', cursor: 'pointer' }}
             >
               下一步：选择品类
             </button>
           </div>
         )}
 
-        {/* Step 2: 品类推荐 */}
         {step === 2 && (
           <div style={{ background: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ marginTop: 0 }}>步骤 2: 选择品类</h2>
-            <p style={{ color: '#6b7280', marginBottom: '20px' }}>我们为你推荐了 20 个高潜力品类，按风险等级分类</p>
+            <h2 style={{ marginTop: 0 }}>步骤 2: 交互筛选品类</h2>
+            <p style={{ color: '#6b7280', marginBottom: '20px' }}>基于渠道和风险偏好动态筛选候选品类，再进入场景预测</p>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '20px' }}>
+              {[
+                { key: 'all', label: '全部风险' },
+                { key: 'green', label: '🟢 低风险' },
+                { key: 'yellow', label: '🟡 中风险' },
+                { key: 'red', label: '🔴 高风险' }
+              ].map((r) => (
+                <button
+                  key={r.key}
+                  onClick={() => setRiskFilter(r.key)}
+                  style={{
+                    padding: '10px',
+                    border: riskFilter === r.key ? '2px solid #10b981' : '1px solid #d1d5db',
+                    borderRadius: '8px',
+                    background: riskFilter === r.key ? '#d1fae5' : 'white',
+                    fontWeight: '600',
+                    cursor: 'pointer'
+                  }}
+                >
+                  {r.label}
+                </button>
+              ))}
+            </div>
+
+            <p style={{ color: '#6b7280', marginBottom: '12px', fontSize: '13px' }}>当前候选：{categories.length} 个</p>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
               {categories.map(cat => (
@@ -174,8 +200,6 @@ export default function App() {
                     transition: 'all 0.2s',
                     background: selectedCategory?.id === cat.id ? '#d1fae5' : 'white'
                   }}
-                  onMouseOver={(e) => { e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
                     <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>{cat.name}</h3>
@@ -195,6 +219,7 @@ export default function App() {
                     <p style={{ margin: '4px 0' }}>💰 采购价: ¥{cat.supplyCost}</p>
                     <p style={{ margin: '4px 0' }}>📊 毛利: {cat.profitMargin}</p>
                     <p style={{ margin: '4px 0' }}>🛒 渠道: {cat.channel}</p>
+                    <p style={{ margin: '4px 0', color: '#10b981' }}>✅ 推荐依据：风险等级 + 渠道匹配 + 毛利区间</p>
                   </div>
                 </div>
               ))}
@@ -202,34 +227,23 @@ export default function App() {
 
             <button
               onClick={() => setStep(1)}
-              style={{
-                marginTop: '24px',
-                padding: '12px 24px',
-                border: '1px solid #d1d5db',
-                background: 'white',
-                borderRadius: '8px',
-                cursor: 'pointer'
-              }}
+              style={{ marginTop: '24px', padding: '12px 24px', border: '1px solid #d1d5db', background: 'white', borderRadius: '8px', cursor: 'pointer' }}
             >
               ← 返回
             </button>
           </div>
         )}
 
-        {/* Step 3: 预测场景选择 */}
         {step === 3 && selectedCategory && (
           <div style={{ background: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <h2 style={{ marginTop: 0 }}>步骤 3: 选择预测场景</h2>
-            <p style={{ color: '#6b7280' }}>为了给你最真实的预测，我们提供三个场景</p>
+            <p style={{ color: '#6b7280' }}>已选择：{selectedCategory.name}（{selectedCategory.channel}）</p>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
               {['conservative', 'normal', 'aggressive'].map(sc => (
                 <button
                   key={sc}
-                  onClick={() => {
-                    setScenario(sc);
-                    generateForecast(selectedCategory.id);
-                  }}
+                  onClick={() => setScenario(sc)}
                   style={{
                     padding: '16px',
                     border: scenario === sc ? '2px solid #10b981' : '1px solid #d1d5db',
@@ -249,17 +263,29 @@ export default function App() {
               ))}
             </div>
 
-            {loading && <p style={{ textAlign: 'center', color: '#6b7280' }}>生成预测中...</p>}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <button
+                onClick={() => setStep(2)}
+                style={{ padding: '12px', border: '1px solid #d1d5db', background: 'white', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}
+              >
+                ← 返回重选品类
+              </button>
+              <button
+                onClick={generateForecast}
+                disabled={loading}
+                style={{ padding: '12px', background: loading ? '#d1d5db' : '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600' }}
+              >
+                {loading ? '⏳ 生成中...' : '生成 3 个月预测'}
+              </button>
+            </div>
           </div>
         )}
 
-        {/* Step 4: 财务预测结果 */}
         {step === 4 && forecast && (
           <div style={{ background: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
             <h2 style={{ marginTop: 0 }}>步骤 4: 3 个月财务预测</h2>
             <p style={{ color: '#6b7280' }}>品类: {forecast.categoryName} | 预算: ¥{forecast.budget} | 场景: {forecast.scenario}</p>
 
-            {/* 关键指标卡片 */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '16px', marginBottom: '24px' }}>
               <div style={{ padding: '16px', background: '#d1fae5', borderRadius: '8px' }}>
                 <p style={{ margin: '0 0 8px 0', fontSize: '12px', color: '#065f46' }}>成功概率</p>
@@ -275,7 +301,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* 预测表格 */}
             <div style={{ overflowX: 'auto', marginBottom: '24px' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
@@ -303,7 +328,6 @@ export default function App() {
               </table>
             </div>
 
-            {/* 成本拆解 */}
             <div style={{ background: '#f9fafb', padding: '16px', borderRadius: '8px', marginBottom: '24px' }}>
               <h3 style={{ marginTop: 0 }}>成本拆解</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', fontSize: '12px' }}>
@@ -316,44 +340,55 @@ export default function App() {
               </div>
             </div>
 
-            {/* 行动按钮 */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <button
-                onClick={() => { setStep(2); setSelectedCategory(null); }}
-                style={{
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  background: 'white',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
+                onClick={() => {
+                  setForecast(null);
+                  setStep(2);
                 }}
+                style={{ padding: '12px', border: '1px solid #d1d5db', background: 'white', borderRadius: '8px', cursor: 'pointer', fontWeight: '600' }}
               >
                 ← 选择其他品类
               </button>
               <button
                 onClick={handleStartPlan}
                 disabled={loading}
-                style={{
-                  padding: '12px',
-                  background: loading ? '#d1d5db' : '#10b981',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  fontWeight: '600'
-                }}
+                style={{ padding: '12px', background: loading ? '#d1d5db' : '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600' }}
               >
-                {loading ? '⏳ 生成中...' : '✓ 开始执行计划'}
+                {loading ? '⏳ 生成中...' : '✓ 打开执行计划面板'}
               </button>
             </div>
           </div>
         )}
       </main>
 
-      {/* Footer */}
+      {showChecklist && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', zIndex: 1000 }}>
+          <div style={{ width: 'min(760px, 100%)', maxHeight: '85vh', overflow: 'auto', background: 'white', borderRadius: '12px', padding: '24px' }}>
+            <h3 style={{ marginTop: 0 }}>4 周行动清单（可执行版）</h3>
+            <p style={{ color: '#6b7280', marginTop: 0 }}>建议逐周推进，并根据实际数据复盘。</p>
+            {checklist.map((week) => (
+              <div key={week.week} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '10px' }}>
+                <p style={{ margin: '0 0 6px 0', fontWeight: 700 }}>{week.week} · {week.title}</p>
+                <ul style={{ margin: 0, paddingLeft: '18px', color: '#374151' }}>
+                  {week.items.map((item) => (
+                    <li key={item} style={{ marginBottom: '4px' }}>{item}</li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+            <button
+              onClick={() => setShowChecklist(false)}
+              style={{ marginTop: '8px', width: '100%', padding: '10px', border: 'none', borderRadius: '8px', background: '#111827', color: 'white', fontWeight: 600, cursor: 'pointer' }}
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
+
       <footer style={{ background: '#f3f4f6', padding: '24px', marginTop: '48px', borderTop: '1px solid #e5e7eb', color: '#6b7280', textAlign: 'center', fontSize: '12px' }}>
-        <p>诸葛选品 v1.0 | 所有分析基于亚马逊、淘宝、TEMU、1688 等真实数据</p>
+        <p>诸葛选品 v1.1 | 交互式筛选 + 分步预测 + 执行面板</p>
       </footer>
     </div>
   );
