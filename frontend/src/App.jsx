@@ -12,10 +12,12 @@ export default function App() {
   const [checklist, setChecklist] = useState([]);
   const [showChecklist, setShowChecklist] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   // 获取品类库
   const loadCategories = async () => {
     try {
+      setError(null);
       if (step !== 2) {
         return;
       }
@@ -33,18 +35,24 @@ export default function App() {
         : { method: 'GET' };
 
       const res = await fetch(endpoint, options);
+      if (!res.ok) throw new Error('获取品类失败');
       const data = await res.json();
-      setCategories(data.data || []);
+      setCategories(Array.isArray(data.data) ? data.data : []);
     } catch (err) {
       console.error('获取品类失败:', err);
+      setError('获取品类失败，请重试');
+      setCategories([]);
     }
   };
 
   useEffect(() => {
     fetch('/api/categories')
-      .then(res => res.json())
-      .then(data => setCategories(data.data || []))
-      .catch(err => console.error('获取品类失败:', err));
+      .then(res => res.ok ? res.json() : Promise.reject('获取品类失败'))
+      .then(data => setCategories(Array.isArray(data.data) ? data.data : []))
+      .catch(err => {
+        console.error('获取品类失败:', err);
+        setCategories([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -53,36 +61,65 @@ export default function App() {
 
   // 处理预算输入
   const handleBudgetChange = (e) => {
-    setBudget(parseInt(e.target.value, 10) || 10000);
+    const value = parseInt(e.target.value, 10);
+    setBudget(isNaN(value) ? 10000 : Math.max(5000, Math.min(50000, value)));
   };
 
   // 选择品类
   const handleSelectCategory = (category) => {
+    if (!category || !category.id) {
+      setError('品类数据无效');
+      return;
+    }
     setSelectedCategory(category);
-    generateForecast(category.id);
     setStep(3);
   };
 
   // 生成财务预测
   const generateForecast = async (categoryId) => {
-    if (!selectedCategory && !categoryId) {
+    const cid = categoryId || selectedCategory?.id;
+    if (!cid) {
+      setError('请先选择品类');
       return;
     }
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch('/api/financial-forecast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryId: categoryId || selectedCategory.id, budget, scenario })
+        body: JSON.stringify({ categoryId: cid, budget, scenario })
       });
+      if (!res.ok) throw new Error('生成预测失败');
       const data = await res.json();
-      if (data.success) {
-        setForecast(data.data);
+      if (data.success && data.data) {
+        // 确保数据结构完整
+        const validForecast = {
+          categoryName: data.data.categoryName || '未知品类',
+          budget: data.data.budget || budget,
+          scenario: data.data.scenario || scenario,
+          successProbability: data.data.successProbability || '50-60%',
+          confidence: data.data.confidence || '±15%',
+          totalMonthlyCost: data.data.totalMonthlyCost || 0,
+          forecast: Array.isArray(data.data.forecast) ? data.data.forecast : [],
+          costs: data.data.costs || {
+            supply: 0,
+            packaging: 0,
+            storage: 0,
+            logistics: 0,
+            marketing: 0,
+            platform: 0,
+            other: 0
+          }
+        };
+        setForecast(validForecast);
         setStep(4);
+      } else {
+        throw new Error(data.error || '生成预测失败');
       }
     } catch (err) {
       console.error('生成预测失败:', err);
-      alert('生成预测失败');
+      setError(err.message || '生成预测失败，请重试');
     }
     setLoading(false);
   };
@@ -90,24 +127,29 @@ export default function App() {
   // 获取行动清单
   const handleStartPlan = async () => {
     if (!selectedCategory) {
-      alert('请先选择品类');
+      setError('请先选择品类');
       return;
     }
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch('/api/action-checklist');
+      if (!res.ok) throw new Error('获取行动清单失败');
       const data = await res.json();
-      if (data.success) {
-        const normalized = (data.data || []).map((w) => ({
-          ...w,
-          items: w.items || w.tasks || []
+      if (data.success && Array.isArray(data.data)) {
+        const normalized = data.data.map((w) => ({
+          week: w.week || '未知周期',
+          title: w.title || '未知标题',
+          items: Array.isArray(w.items) ? w.items : (Array.isArray(w.tasks) ? w.tasks : [])
         }));
         setChecklist(normalized);
         setShowChecklist(true);
+      } else {
+        throw new Error('行动清单数据无效');
       }
     } catch (err) {
       console.error('获取行动清单失败:', err);
-      alert('获取行动清单失败');
+      setError(err.message || '获取行动清单失败，请重试');
     }
     setLoading(false);
   };
@@ -121,6 +163,13 @@ export default function App() {
           <p style={{ margin: 0, fontSize: '14px', opacity: 0.9 }}>小微卖家 3 个月回本计划生成器</p>
         </div>
       </header>
+
+      {/* Error Alert */}
+      {error && (
+        <div style={{ maxWidth: '1200px', margin: '16px auto', padding: '12px 16px', background: '#fee2e2', border: '1px solid #fecaca', borderRadius: '8px', color: '#991b1b' }}>
+          {error}
+        </div>
+      )}
 
       {/* Main Content */}
       <main style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
@@ -144,7 +193,8 @@ export default function App() {
                   padding: '12px',
                   border: '1px solid #d1d5db',
                   borderRadius: '8px',
-                  fontSize: '16px'
+                  fontSize: '16px',
+                  boxSizing: 'border-box'
                 }}
               />
               <p style={{ fontSize: '12px', color: '#6b7280', margin: '8px 0 0 0' }}>建议 1-2 万元</p>
@@ -225,43 +275,47 @@ export default function App() {
             <p style={{ color: '#6b7280', marginBottom: '12px', fontSize: '13px' }}>当前候选：{categories.length} 个</p>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '16px' }}>
-              {categories.map(cat => (
-                <div
-                  key={cat.id}
-                  onClick={() => handleSelectCategory(cat)}
-                  style={{
-                    padding: '16px',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '8px',
-                    cursor: 'pointer',
-                    transition: 'all 0.2s',
-                    background: selectedCategory?.id === cat.id ? '#d1fae5' : 'white'
-                  }}
-                  onMouseOver={(e) => { e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>{cat.name}</h3>
-                    <span style={{
-                      padding: '4px 8px',
-                      background: cat.riskLevel === 'green' ? '#d1fae5' : cat.riskLevel === 'yellow' ? '#fef3c7' : '#fee2e2',
-                      color: cat.riskLevel === 'green' ? '#065f46' : cat.riskLevel === 'yellow' ? '#92400e' : '#991b1b',
-                      borderRadius: '4px',
-                      fontSize: '12px',
-                      fontWeight: '600'
-                    }}>
-                      {cat.riskLevel === 'green' ? '🟢 绿' : cat.riskLevel === 'yellow' ? '🟡 黄' : '🔴 红'}
-                    </span>
+              {categories && categories.length > 0 ? (
+                categories.map(cat => (
+                  <div
+                    key={cat.id}
+                    onClick={() => handleSelectCategory(cat)}
+                    style={{
+                      padding: '16px',
+                      border: '1px solid #d1d5db',
+                      borderRadius: '8px',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s',
+                      background: selectedCategory?.id === cat.id ? '#d1fae5' : 'white'
+                    }}
+                    onMouseOver={(e) => { e.currentTarget.style.boxShadow = '0 4px 6px rgba(0,0,0,0.1)'; }}
+                    onMouseOut={(e) => { e.currentTarget.style.boxShadow = 'none'; }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: '8px' }}>
+                      <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '600' }}>{cat.name || '未知'}</h3>
+                      <span style={{
+                        padding: '4px 8px',
+                        background: cat.riskLevel === 'green' ? '#d1fae5' : cat.riskLevel === 'yellow' ? '#fef3c7' : '#fee2e2',
+                        color: cat.riskLevel === 'green' ? '#065f46' : cat.riskLevel === 'yellow' ? '#92400e' : '#991b1b',
+                        borderRadius: '4px',
+                        fontSize: '12px',
+                        fontWeight: '600'
+                      }}>
+                        {cat.riskLevel === 'green' ? '🟢 绿' : cat.riskLevel === 'yellow' ? '🟡 黄' : '🔴 红'}
+                      </span>
+                    </div>
+                    <p style={{ margin: '8px 0', fontSize: '12px', color: '#6b7280' }}>{cat.description || '暂无描述'}</p>
+                    <div style={{ fontSize: '12px', color: '#374151', lineHeight: '1.6' }}>
+                      <p style={{ margin: '4px 0' }}>💰 采购价: ¥{cat.supplyCost || 'N/A'}</p>
+                      <p style={{ margin: '4px 0' }}>📊 毛利: {cat.profitMargin || 'N/A'}</p>
+                      <p style={{ margin: '4px 0' }}>🛒 渠道: {cat.channel || 'N/A'}</p>
+                      <p style={{ margin: '4px 0', color: '#10b981' }}>✅ 推荐依据：风险等级 + 渠道匹配 + 毛利区间</p>
+                    </div>
                   </div>
-                  <p style={{ margin: '8px 0', fontSize: '12px', color: '#6b7280' }}>{cat.description}</p>
-                  <div style={{ fontSize: '12px', color: '#374151', lineHeight: '1.6' }}>
-                    <p style={{ margin: '4px 0' }}>💰 采购价: ¥{cat.supplyCost}</p>
-                    <p style={{ margin: '4px 0' }}>📊 毛利: {cat.profitMargin}</p>
-                    <p style={{ margin: '4px 0' }}>🛒 渠道: {cat.channel}</p>
-                    <p style={{ margin: '4px 0', color: '#10b981' }}>✅ 推荐依据：风险等级 + 渠道匹配 + 毛利区间</p>
-                  </div>
-                </div>
-              ))}
+                ))
+              ) : (
+                <p style={{ color: '#6b7280' }}>暂无符合条件的品类</p>
+              )}
             </div>
 
             <button
@@ -369,16 +423,22 @@ export default function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {forecast.forecast.map((row, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
-                      <td style={{ padding: '12px' }}>第 {row.month} 月</td>
-                      <td style={{ padding: '12px', textAlign: 'right' }}>{row.volume}</td>
-                      <td style={{ padding: '12px', textAlign: 'right' }}>¥{row.revenue}</td>
-                      <td style={{ padding: '12px', textAlign: 'right' }}>¥{row.cost}</td>
-                      <td style={{ padding: '12px', textAlign: 'right', color: row.monthProfit > 0 ? '#10b981' : '#ef4444', fontWeight: '600' }}>¥{row.monthProfit}</td>
-                      <td style={{ padding: '12px', textAlign: 'right', color: row.cumulativeProfit > 0 ? '#10b981' : '#ef4444', fontWeight: '600' }}>¥{row.cumulativeProfit}</td>
+                  {forecast.forecast && Array.isArray(forecast.forecast) && forecast.forecast.length > 0 ? (
+                    forecast.forecast.map((row, idx) => (
+                      <tr key={idx} style={{ borderBottom: '1px solid #e5e7eb' }}>
+                        <td style={{ padding: '12px' }}>第 {row.month} 月</td>
+                        <td style={{ padding: '12px', textAlign: 'right' }}>{row.volume}</td>
+                        <td style={{ padding: '12px', textAlign: 'right' }}>¥{row.revenue}</td>
+                        <td style={{ padding: '12px', textAlign: 'right' }}>¥{row.cost}</td>
+                        <td style={{ padding: '12px', textAlign: 'right', color: row.monthProfit > 0 ? '#10b981' : '#ef4444', fontWeight: '600' }}>¥{row.monthProfit}</td>
+                        <td style={{ padding: '12px', textAlign: 'right', color: row.cumulativeProfit > 0 ? '#10b981' : '#ef4444', fontWeight: '600' }}>¥{row.cumulativeProfit}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan="6" style={{ padding: '12px', textAlign: 'center', color: '#6b7280' }}>暂无预测数据</td>
                     </tr>
-                  ))}
+                  )}
                 </tbody>
               </table>
             </div>
@@ -387,12 +447,12 @@ export default function App() {
             <div style={{ background: '#f9fafb', padding: '16px', borderRadius: '8px', marginBottom: '24px' }}>
               <h3 style={{ marginTop: 0 }}>成本拆解</h3>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))', gap: '12px', fontSize: '12px' }}>
-                <div><strong>采购</strong>: ¥{Math.round(forecast.costs.supply)}</div>
-                <div><strong>包装</strong>: ¥{Math.round(forecast.costs.packaging)}</div>
-                <div><strong>仓储</strong>: ¥{Math.round(forecast.costs.storage)}</div>
-                <div><strong>物流</strong>: ¥{Math.round(forecast.costs.logistics)}</div>
-                <div><strong>推广</strong>: ¥{Math.round(forecast.costs.marketing)}</div>
-                <div><strong>平台费</strong>: ¥{Math.round(forecast.costs.platform)}</div>
+                <div><strong>采购</strong>: ¥{Math.round(forecast.costs?.supply || 0)}</div>
+                <div><strong>包装</strong>: ¥{Math.round(forecast.costs?.packaging || 0)}</div>
+                <div><strong>仓储</strong>: ¥{Math.round(forecast.costs?.storage || 0)}</div>
+                <div><strong>物流</strong>: ¥{Math.round(forecast.costs?.logistics || 0)}</div>
+                <div><strong>推广</strong>: ¥{Math.round(forecast.costs?.marketing || 0)}</div>
+                <div><strong>平台费</strong>: ¥{Math.round(forecast.costs?.platform || 0)}</div>
               </div>
             </div>
 
@@ -425,16 +485,24 @@ export default function App() {
           <div style={{ width: 'min(760px, 100%)', maxHeight: '85vh', overflow: 'auto', background: 'white', borderRadius: '12px', padding: '24px' }}>
             <h3 style={{ marginTop: 0 }}>4 周行动清单（可执行版）</h3>
             <p style={{ color: '#6b7280', marginTop: 0 }}>建议逐周推进，并根据实际数据复盘。</p>
-            {checklist.map((week) => (
-              <div key={week.week} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '10px' }}>
-                <p style={{ margin: '0 0 6px 0', fontWeight: 700 }}>{week.week} · {week.title}</p>
-                <ul style={{ margin: 0, paddingLeft: '18px', color: '#374151' }}>
-                  {week.items.map((item) => (
-                    <li key={item} style={{ marginBottom: '4px' }}>{item}</li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+            {checklist && Array.isArray(checklist) && checklist.length > 0 ? (
+              checklist.map((week) => (
+                <div key={week.week} style={{ border: '1px solid #e5e7eb', borderRadius: '8px', padding: '12px', marginBottom: '10px' }}>
+                  <p style={{ margin: '0 0 6px 0', fontWeight: 700 }}>{week.week} · {week.title}</p>
+                  <ul style={{ margin: 0, paddingLeft: '18px', color: '#374151' }}>
+                    {week.items && Array.isArray(week.items) && week.items.length > 0 ? (
+                      week.items.map((item, idx) => (
+                        <li key={idx} style={{ marginBottom: '4px' }}>{item}</li>
+                      ))
+                    ) : (
+                      <li>暂无任务</li>
+                    )}
+                  </ul>
+                </div>
+              ))
+            ) : (
+              <p style={{ color: '#6b7280' }}>暂无行动清单</p>
+            )}
             <button
               onClick={() => setShowChecklist(false)}
               style={{ marginTop: '8px', width: '100%', padding: '10px', border: 'none', borderRadius: '8px', background: '#111827', color: 'white', fontWeight: 600, cursor: 'pointer' }}
@@ -446,7 +514,7 @@ export default function App() {
       )}
 
       <footer style={{ background: '#f3f4f6', padding: '24px', marginTop: '48px', borderTop: '1px solid #e5e7eb', color: '#6b7280', textAlign: 'center', fontSize: '12px' }}>
-        <p>诸葛选品 v1.1 | 交互式筛选 + 分步预测 + 执行面板</p>
+        <p>诸葛选品 v1.2 | 交互式筛选 + 分步预测 + 执行面板 | 修复 React 错误</p>
       </footer>
     </div>
   );
