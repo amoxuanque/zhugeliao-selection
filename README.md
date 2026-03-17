@@ -24,6 +24,21 @@ npm start
 - `POST /api/financial-forecast` - 生成财务预测
 - `GET /api/action-checklist` - 获取行动清单
 - `GET /api/risk-warnings` - 获取风险预警
+- `POST /api/search/live` - Tavily 实时搜索
+- `POST /api/search/rerank` - 搜索结果重排（支持 `provider=mock|tavily`）
+- `POST /api/rpa/tasks` - 创建 RPA 编排任务（支持 `provider=mock|tavily`）
+- `GET /api/data/quality` - 数据质量与新鲜度指标
+
+
+### Tavily 实时搜索配置
+
+在运行服务前配置环境变量：
+
+```bash
+export TAVILY_API_KEY=your_tavily_key
+```
+
+未配置时，Search/RPA 会回退到 mock provider。
 
 ## 部署到 Zeabur
 
