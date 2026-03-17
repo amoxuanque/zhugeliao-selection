@@ -4,16 +4,16 @@ LABEL "framework"="express"
 
 WORKDIR /app
 
-# 复制根目录 package.json
-COPY package.json .
+# 复制根目录 package.json 和 lock 文件
+COPY package.json package-lock.json* ./
 
 # 安装根目录依赖
 RUN npm install
 
-# 复制前端目录
+# 复制前端目录（包括 package.json 和 lock 文件）
 COPY frontend/ frontend/
 
-# 进入前端目录安装依赖
+# 进入前端目录安装依赖（包括 devDependencies）
 WORKDIR /app/frontend
 RUN npm install
 
@@ -28,4 +28,4 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["npm", "start"]
+CMD ["node", "server.js"]
