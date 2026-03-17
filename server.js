@@ -303,6 +303,7 @@ const riskWarnings = {
   critical: [
     {
       title: "供应商风险",
+      @@ -306,167 +306,603 @@ const riskWarnings = {
       description: "样品质量不稳定、交期延误",
       prevention: "多家对比、签署协议、预付样品定金"
     },
@@ -383,6 +384,71 @@ const scenarioMultipliers = {
   normal: [0.5, 0.75, 1],
   aggressive: [0.7, 1, 1.2]
 };
+
+
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
+const TAVILY_SEARCH_URL = 'https://api.tavily.com/search';
+
+async function fetchTavilySearch({ query, topic = 'general', maxResults = 8, searchDepth = 'advanced' }) {
+  if (!TAVILY_API_KEY) {
+    throw new Error('TAVILY_API_KEY 未配置');
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 12000);
+
+  try {
+    const response = await fetch(TAVILY_SEARCH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        api_key: TAVILY_API_KEY,
+        query,
+        topic,
+        search_depth: searchDepth,
+        max_results: maxResults,
+        include_answer: false,
+        include_images: false,
+        include_raw_content: false
+      }),
+      signal: controller.signal
+    });
+
+    if (!response.ok) {
+      const msg = await response.text();
+      throw new Error(`Tavily 请求失败: ${response.status} ${msg}`);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function normalizeTavilyResults(payload, platformHint, categoryHint) {
+  const now = new Date().toISOString();
+  return (payload.results || []).map((r, idx) => ({
+    id: `tavily-${idx}-${Date.now()}`,
+    platform: platformHint || 'web',
+    categoryId: Number(categoryHint) || null,
+    categoryName: categoryHint ? (categoryLibrary.find(c => c.id === Number(categoryHint))?.name || '未知品类') : '未知品类',
+    title: r.title || '未命名结果',
+    snippet: r.content || '',
+    sourceUrl: r.url || '',
+    sourceDomain: (() => {
+      try {
+        return r.url ? new URL(r.url).hostname : '';
+      } catch {
+        return '';
+      }
+    })(),
+    updatedAt: now,
+    estMonthlySales: 1000,
+    rating: 4.5,
+    shopLevel: 'N/A',
+    confidenceScore: Number((r.score ?? 0.5).toFixed(2))
+  }));
+}
 
 function calcScenarioForecast(category, budget, scenario = 'normal', overrides = {}) {
   const baseCostRates = {
@@ -484,29 +550,54 @@ function rerankSearchResults(items, query = '') {
 }
 
 function enqueueRpaTask(task) {
-  rpaTasks.push(task);
-  setTimeout(() => {
+  if (!rpaTasks.some((t) => t.id === task.id)) {
+    rpaTasks.push(task);
+  }
+  setTimeout(async () => {
     task.status = 'running';
     task.attempts += 1;
-  }, 300);
 
-  setTimeout(() => {
-    const isFail = task.target.includes('fail') && task.attempts < task.maxRetries;
-    if (isFail) {
-      task.status = 'retrying';
-      task.error = '触发平台频控，已进入重试队列';
-      enqueueRpaTask(task);
-      return;
+    try {
+      const isFail = task.target.includes('fail') && task.attempts < task.maxRetries;
+      if (isFail) {
+        task.status = 'retrying';
+        task.error = '触发平台频控，已进入重试队列';
+        enqueueRpaTask(task);
+        return;
+      }
+
+      if (task.provider === 'tavily') {
+        const payload = await fetchTavilySearch({ query: `${task.platform} ${task.target}`, maxResults: 5 });
+        const normalized = normalizeTavilyResults(payload, task.platform, task.categoryId);
+        task.result = {
+          captured: normalized.length,
+          platform: task.platform,
+          target: task.target,
+          sources: normalized.map((r) => r.sourceUrl).filter(Boolean)
+        };
+      } else {
+        task.result = {
+          captured: Math.floor(100 + Math.random() * 200),
+          platform: task.platform,
+          target: task.target
+        };
+      }
+
+      task.status = 'completed';
+      task.error = null;
+      task.finishedAt = new Date().toISOString();
+    } catch (error) {
+      if (task.attempts < task.maxRetries) {
+        task.status = 'retrying';
+        task.error = error.message;
+        enqueueRpaTask(task);
+      } else {
+        task.status = 'failed';
+        task.error = error.message;
+        task.finishedAt = new Date().toISOString();
+      }
     }
-
-    task.status = 'completed';
-    task.finishedAt = new Date().toISOString();
-    task.result = {
-      captured: Math.floor(100 + Math.random() * 200),
-      platform: task.platform,
-      target: task.target
-    };
-  }, 1200);
+  }, 300);
 }
 
 // API 端点
@@ -554,26 +645,103 @@ app.get('/api/data/snapshots', (req, res) => {
   });
 });
 
-// Search + 重排
-app.post('/api/search/rerank', (req, res) => {
-  const { query = '', platform, categoryId, limit = 10 } = req.body || {};
 
-  let candidates = platformProducts;
-  if (platform) {
-    candidates = candidates.filter((p) => p.platform === platform);
-  }
-  if (categoryId) {
-    candidates = candidates.filter((p) => p.categoryId === Number(categoryId));
-  }
+app.get('/api/data/quality', (req, res) => {
+  const now = Date.now();
+  const freshnessMs = now - new Date(dataSnapshots.platform_products.updatedAt).getTime();
+  const freshnessHours = Number((freshnessMs / 36e5).toFixed(2));
 
-  const ranked = rerankSearchResults(candidates, query).slice(0, Number(limit));
   res.json({
     success: true,
-    query,
-    count: ranked.length,
-    data: ranked,
-    factors: ['keywordScore', 'salesScore', 'ratingScore', 'marginScore', 'competitionPenalty']
+    data: {
+      freshnessHours,
+      sourceCoverage: dataSnapshots.platform_products.sourceCount,
+      records: {
+        products: platformProducts.length,
+        reviews: productReviews.length
+      },
+      realtimeSearchEnabled: Boolean(TAVILY_API_KEY),
+      guardrails: [
+        '返回 sourceUrl/sourceDomain/fetchedAt',
+        '重排因子可解释',
+        'provider 区分 mock 与 tavily'
+      ]
+    }
   });
+});
+
+// Search + 重排（支持 mock / tavily）
+app.post('/api/search/rerank', async (req, res) => {
+  const { query = '', platform, categoryId, limit = 10, provider = 'mock' } = req.body || {};
+
+  try {
+    let candidates = platformProducts;
+
+    if (provider === 'tavily') {
+      const payload = await fetchTavilySearch({
+        query: [query, platform, categoryId ? `category:${categoryId}` : ''].filter(Boolean).join(' '),
+        maxResults: Number(limit)
+      });
+      candidates = normalizeTavilyResults(payload, platform, categoryId);
+    } else {
+      if (platform) {
+        candidates = candidates.filter((p) => p.platform === platform);
+      }
+      if (categoryId) {
+        candidates = candidates.filter((p) => p.categoryId === Number(categoryId));
+      }
+    }
+
+    const ranked = rerankSearchResults(candidates, query).slice(0, Number(limit));
+    res.json({
+      success: true,
+      provider,
+      query,
+      count: ranked.length,
+      data: ranked,
+      factors: ['keywordScore', 'salesScore', 'ratingScore', 'marginScore', 'competitionPenalty'],
+      freshness: {
+        fetchedAt: new Date().toISOString(),
+        realtime: provider === 'tavily',
+        hasTavilyKey: Boolean(TAVILY_API_KEY)
+      }
+    });
+  } catch (error) {
+    res.status(502).json({ success: false, error: '实时搜索失败', message: error.message });
+  }
+});
+
+// Tavily 实时搜索（原始结果）
+app.post('/api/search/live', async (req, res) => {
+  const { query = '', platform, categoryId, maxResults = 8, topic = 'general', searchDepth = 'advanced' } = req.body || {};
+  if (!query) {
+    return res.status(400).json({ success: false, error: 'query 不能为空' });
+  }
+
+  try {
+    const payload = await fetchTavilySearch({
+      query: [query, platform, categoryId ? `category:${categoryId}` : ''].filter(Boolean).join(' '),
+      topic,
+      maxResults: Number(maxResults),
+      searchDepth
+    });
+
+    const normalized = normalizeTavilyResults(payload, platform, categoryId);
+    res.json({
+      success: true,
+      provider: 'tavily',
+      query,
+      count: normalized.length,
+      fetchedAt: new Date().toISOString(),
+      data: normalized,
+      raw: {
+        hasAnswer: Boolean(payload.answer),
+        responseTime: payload.response_time || null
+      }
+    });
+  } catch (error) {
+    res.status(502).json({ success: false, error: 'Tavily 实时搜索失败', message: error.message });
+  }
 });
 
 // 评论主题分析
@@ -599,11 +767,17 @@ app.post('/api/reviews/analyze', (req, res) => {
 
 // RPA 编排：创建任务
 app.post('/api/rpa/tasks', (req, res) => {
-  const { platform = '淘宝', target = '榜单抓取', maxRetries = 2 } = req.body || {};
+  const { platform = '淘宝', target = '榜单抓取', maxRetries = 2, provider = 'mock', categoryId = null } = req.body || {};
+  if (provider === 'tavily' && !TAVILY_API_KEY) {
+    return res.status(400).json({ success: false, error: '缺少 TAVILY_API_KEY，无法执行 tavily provider 任务' });
+  }
+
   const task = {
     id: `task_${Date.now()}`,
     platform,
     target,
+    provider,
+    categoryId,
     status: 'queued',
     attempts: 0,
     maxRetries,
@@ -640,6 +814,15 @@ app.post('/api/financial-forecast', (req, res) => {
     return res.status(404).json({ success: false, error: '品类不存在' });
   }
 
+  // 成本拆解
+  const monthlyCosts = {
+    supply: budget * 0.6,      // 采购 60%
+    packaging: budget * 0.05,  // 包装 5%
+    storage: budget * 0.05,    // 仓储 5%
+    logistics: budget * 0.08,  // 物流 8%
+    marketing: budget * 0.12,  // 推广 12%
+    platform: budget * 0.05,   // 平台费 5%
+    other: budget * 0.05       // 其他风险 5%
   const simulation = calcScenarioForecast(category, Number(budget), scenario);
   const confidenceMap = {
     conservative: '±25%',
@@ -647,6 +830,33 @@ app.post('/api/financial-forecast', (req, res) => {
     aggressive: '±30%'
   };
 
+  const totalMonthlyCost = Object.values(monthlyCosts).reduce((a, b) => a + b, 0);
+
+  // 销量预测（三个场景）
+  const scenarios = {
+    conservative: {
+      months: [
+        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.3), scenario: '保守' },
+        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 0.5), scenario: '保守' },
+        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 0.7), scenario: '保守' }
+      ],
+      confidence: '±25%'
+    },
+    normal: {
+      months: [
+        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.5), scenario: '正常' },
+        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 0.75), scenario: '正常' },
+        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 1.0), scenario: '正常' }
+      ],
+      confidence: '±15%'
+    },
+    aggressive: {
+      months: [
+        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.7), scenario: '激进' },
+        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 1.0), scenario: '激进' },
+        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 1.2), scenario: '激进' }
+      ],
+      confidence: '±30%'
   res.json({
     success: true,
     data: {
@@ -659,9 +869,15 @@ app.post('/api/financial-forecast', (req, res) => {
       confidence: confidenceMap[scenario] || confidenceMap.normal,
       successProbability: category.riskLevel === 'green' ? '70-80%' : category.riskLevel === 'yellow' ? '40-60%' : '20-40%'
     }
+  };
+
+  const selectedScenario = scenarios[scenario] || scenarios.normal;
   });
 });
 
+  // 计算收入和利润
+  const supplyPrice = parseFloat(category.supplyCost.split('-')[0]);
+  const profitMargin = parseFloat(category.profitMargin.split('-')[0]) / 100;
 // 参数化财务模拟（P10/P50/P90）
 app.post('/api/forecast/simulate', (req, res) => {
   const {
@@ -671,6 +887,10 @@ app.post('/api/forecast/simulate', (req, res) => {
     assumptions = {}
   } = req.body || {};
 
+  const forecast = selectedScenario.months.map(m => {
+    const revenue = m.volume * (supplyPrice / (1 - profitMargin));
+    const cost = m.volume * supplyPrice;
+    const profit = revenue - cost - (totalMonthlyCost / 3);
   const category = categoryLibrary.find((c) => c.id === Number(categoryId));
   if (!category) {
     return res.status(404).json({ success: false, error: '品类不存在' });
@@ -679,6 +899,14 @@ app.post('/api/forecast/simulate', (req, res) => {
     return res.status(400).json({ success: false, error: '预算必须大于 0' });
   }
 
+    return {
+      month: m.month,
+      volume: m.volume,
+      revenue: Math.round(revenue),
+      cost: Math.round(cost),
+      monthProfit: Math.round(profit),
+      cumulativeProfit: Math.round(profit * m.month)
+    };
   const p10 = calcScenarioForecast(category, Number(budget), scenario, {
     priceMultiplier: assumptions.priceMultiplierP10 ?? 0.92,
     cvrMultiplier: assumptions.cvrMultiplierP10 ?? 0.85,
@@ -700,6 +928,13 @@ app.post('/api/forecast/simulate', (req, res) => {
     data: {
       categoryId: category.id,
       categoryName: category.name,
+      budget: budget,
+      scenario: scenario,
+      costs: monthlyCosts,
+      totalMonthlyCost: Math.round(totalMonthlyCost),
+      forecast: forecast,
+      confidence: selectedScenario.confidence,
+      successProbability: category.riskLevel === 'green' ? '70-80%' : category.riskLevel === 'yellow' ? '40-60%' : '20-40%'
       budget: Number(budget),
       scenario,
       assumptionsApplied: {
@@ -733,11 +968,3 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     error: '服务器错误',
-    message: err.message
-  });
-});
-
-app.listen(PORT, () => {
-  console.log(`🚀 诸葛选品 Backend 运行在 http://localhost:${PORT}`);
-  console.log(`📊 API 文档: http://localhost:${PORT}/api`);
-});
