@@ -16,7 +16,7 @@ WORKDIR /app/frontend
 RUN npm install
 
 # 构建前端
-RUN npm run build
+# RUN npm run build
 
 # 回到根目录
 WORKDIR /app
