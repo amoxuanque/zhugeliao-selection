@@ -303,7 +303,6 @@ const riskWarnings = {
   critical: [
     {
       title: "供应商风险",
-      @@ -306,167 +306,603 @@ const riskWarnings = {
       description: "样品质量不稳定、交期延误",
       prevention: "多家对比、签署协议、预付样品定金"
     },
@@ -329,8 +328,7 @@ const riskWarnings = {
   ]
 };
 
-// ---------------- P1: 数据底座 / Search / RPA / 评论分析 / 参数化模拟 ----------------
-
+// 平台商品数据
 const platformProducts = [
   { id: 'tb-1001', platform: '淘宝', categoryId: 4, title: '免打孔家居收纳盒大容量', price: 29.9, estMonthlySales: 1800, rating: 4.7, shopLevel: '金牌', updatedAt: '2026-03-15' },
   { id: 'tb-1002', platform: '淘宝', categoryId: 9, title: '宠物自动喂食器智能定时', price: 119, estMonthlySales: 620, rating: 4.6, shopLevel: '钻石', updatedAt: '2026-03-15' },
@@ -340,6 +338,7 @@ const platformProducts = [
   { id: '1688-3002', platform: '1688', categoryId: 13, title: '工作服夏季透气工装套装', price: 46, estMonthlySales: 860, rating: 4.6, shopLevel: '实力商家', updatedAt: '2026-03-16' }
 ];
 
+// 评论数据
 const productReviews = [
   { productId: 'tb-1001', rating: 5, content: '收纳空间大，安装方便，物流也快', date: '2026-03-10' },
   { productId: 'tb-1001', rating: 2, content: '塑料有味道，边缘有毛刺，客服回复慢', date: '2026-03-11' },
@@ -350,6 +349,7 @@ const productReviews = [
   { productId: '1688-3001', rating: 3, content: '发货稍慢，价格还能再谈', date: '2026-03-14' }
 ];
 
+// 数据快照
 const dataSnapshots = {
   platform_products: {
     total: platformProducts.length,
@@ -384,7 +384,6 @@ const scenarioMultipliers = {
   normal: [0.5, 0.75, 1],
   aggressive: [0.7, 1, 1.2]
 };
-
 
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '';
 const TAVILY_SEARCH_URL = 'https://api.tavily.com/search';
@@ -645,7 +644,7 @@ app.get('/api/data/snapshots', (req, res) => {
   });
 });
 
-
+// 数据质量检查
 app.get('/api/data/quality', (req, res) => {
   const now = Date.now();
   const freshnessMs = now - new Date(dataSnapshots.platform_products.updatedAt).getTime();
@@ -807,22 +806,17 @@ app.get('/api/rpa/tasks/:id', (req, res) => {
 
 // 财务预测计算
 app.post('/api/financial-forecast', (req, res) => {
-  const { categoryId, budget, scenario } = req.body;
+  const { categoryId, budget, scenario = 'normal' } = req.body;
   const category = categoryLibrary.find(c => c.id === parseInt(categoryId));
 
   if (!category) {
     return res.status(404).json({ success: false, error: '品类不存在' });
   }
 
-  // 成本拆解
-  const monthlyCosts = {
-    supply: budget * 0.6,      // 采购 60%
-    packaging: budget * 0.05,  // 包装 5%
-    storage: budget * 0.05,    // 仓储 5%
-    logistics: budget * 0.08,  // 物流 8%
-    marketing: budget * 0.12,  // 推广 12%
-    platform: budget * 0.05,   // 平台费 5%
-    other: budget * 0.05       // 其他风险 5%
+  if (!budget || Number(budget) <= 0) {
+    return res.status(400).json({ success: false, error: '预算必须大于 0' });
+  }
+
   const simulation = calcScenarioForecast(category, Number(budget), scenario);
   const confidenceMap = {
     conservative: '±25%',
@@ -830,38 +824,11 @@ app.post('/api/financial-forecast', (req, res) => {
     aggressive: '±30%'
   };
 
-  const totalMonthlyCost = Object.values(monthlyCosts).reduce((a, b) => a + b, 0);
-
-  // 销量预测（三个场景）
-  const scenarios = {
-    conservative: {
-      months: [
-        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.3), scenario: '保守' },
-        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 0.5), scenario: '保守' },
-        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 0.7), scenario: '保守' }
-      ],
-      confidence: '±25%'
-    },
-    normal: {
-      months: [
-        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.5), scenario: '正常' },
-        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 0.75), scenario: '正常' },
-        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 1.0), scenario: '正常' }
-      ],
-      confidence: '±15%'
-    },
-    aggressive: {
-      months: [
-        { month: 1, volume: Math.floor(category.newbieMonthlyTarget * 0.7), scenario: '激进' },
-        { month: 2, volume: Math.floor(category.newbieMonthlyTarget * 1.0), scenario: '激进' },
-        { month: 3, volume: Math.floor(category.newbieMonthlyTarget * 1.2), scenario: '激进' }
-      ],
-      confidence: '±30%'
   res.json({
     success: true,
     data: {
       categoryName: category.name,
-      budget: budget,
+      budget: Number(budget),
       scenario: scenario,
       costs: simulation.monthlyCosts,
       totalMonthlyCost: simulation.totalMonthlyCost,
@@ -869,15 +836,9 @@ app.post('/api/financial-forecast', (req, res) => {
       confidence: confidenceMap[scenario] || confidenceMap.normal,
       successProbability: category.riskLevel === 'green' ? '70-80%' : category.riskLevel === 'yellow' ? '40-60%' : '20-40%'
     }
-  };
-
-  const selectedScenario = scenarios[scenario] || scenarios.normal;
   });
 });
 
-  // 计算收入和利润
-  const supplyPrice = parseFloat(category.supplyCost.split('-')[0]);
-  const profitMargin = parseFloat(category.profitMargin.split('-')[0]) / 100;
 // 参数化财务模拟（P10/P50/P90）
 app.post('/api/forecast/simulate', (req, res) => {
   const {
@@ -887,10 +848,6 @@ app.post('/api/forecast/simulate', (req, res) => {
     assumptions = {}
   } = req.body || {};
 
-  const forecast = selectedScenario.months.map(m => {
-    const revenue = m.volume * (supplyPrice / (1 - profitMargin));
-    const cost = m.volume * supplyPrice;
-    const profit = revenue - cost - (totalMonthlyCost / 3);
   const category = categoryLibrary.find((c) => c.id === Number(categoryId));
   if (!category) {
     return res.status(404).json({ success: false, error: '品类不存在' });
@@ -899,14 +856,6 @@ app.post('/api/forecast/simulate', (req, res) => {
     return res.status(400).json({ success: false, error: '预算必须大于 0' });
   }
 
-    return {
-      month: m.month,
-      volume: m.volume,
-      revenue: Math.round(revenue),
-      cost: Math.round(cost),
-      monthProfit: Math.round(profit),
-      cumulativeProfit: Math.round(profit * m.month)
-    };
   const p10 = calcScenarioForecast(category, Number(budget), scenario, {
     priceMultiplier: assumptions.priceMultiplierP10 ?? 0.92,
     cvrMultiplier: assumptions.cvrMultiplierP10 ?? 0.85,
@@ -928,13 +877,6 @@ app.post('/api/forecast/simulate', (req, res) => {
     data: {
       categoryId: category.id,
       categoryName: category.name,
-      budget: budget,
-      scenario: scenario,
-      costs: monthlyCosts,
-      totalMonthlyCost: Math.round(totalMonthlyCost),
-      forecast: forecast,
-      confidence: selectedScenario.confidence,
-      successProbability: category.riskLevel === 'green' ? '70-80%' : category.riskLevel === 'yellow' ? '40-60%' : '20-40%'
       budget: Number(budget),
       scenario,
       assumptionsApplied: {
@@ -968,3 +910,11 @@ app.use((err, req, res, next) => {
   res.status(500).json({
     success: false,
     error: '服务器错误',
+    message: err.message
+  });
+});
+
+// 启动服务器
+app.listen(PORT, () => {
+  console.log(`🚀 诸葛选品 Backend 运行在 http://localhost:${PORT}`);
+});
