@@ -13,6 +13,15 @@ const PORT = process.env.PORT || process.env.SERVER_PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// 根路由健康检查
+app.get('/', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'zhugeliao-selection',
+    timestamp: new Date().toISOString()
+  });
+});
+
 // 品类库数据（20 个高潜力品类）
 const categoryLibrary = [
   {
