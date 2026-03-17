@@ -24,6 +24,7 @@ WORKDIR /app
 # 复制所有源代码
 COPY . .
 
-EXPOSE 8080
+# 暴露端口
+EXPOSE 3000 8080
 
 CMD ["node", "server.js"]
