@@ -2,11 +2,7 @@
   "build": {
     "builder": "nodejs"
   },
-  "services": {
-    "api": {
-      "sourceDir": ".",
-      "buildCommand": "npm install",
-      "startCommand": "npm start"
-    }
+  "publish": {
+    "public": "frontend/dist"
   }
 }
