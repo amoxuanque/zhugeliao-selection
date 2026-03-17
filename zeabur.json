@@ -2,7 +2,5 @@
   "build": {
     "builder": "nodejs"
   },
-  "publish": {
-    "public": "frontend/dist"
-  }
+  "port": 8080
 }
