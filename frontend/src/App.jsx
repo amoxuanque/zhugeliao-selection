@@ -46,12 +46,13 @@ export default function App() {
       .then(data => setCategories(data.data || []))
       .catch(err => console.error('获取品类失败:', err));
   }, []);
+
+  useEffect(() => {
     loadCategories();
   }, [step, channel, riskFilter]);
 
   // 处理预算输入
   const handleBudgetChange = (e) => {
-    setBudget(parseInt(e.target.value) || 10000);
     setBudget(parseInt(e.target.value, 10) || 10000);
   };
 
@@ -64,8 +65,7 @@ export default function App() {
 
   // 生成财务预测
   const generateForecast = async (categoryId) => {
-  const generateForecast = async () => {
-    if (!selectedCategory) {
+    if (!selectedCategory && !categoryId) {
       return;
     }
     setLoading(true);
@@ -73,8 +73,7 @@ export default function App() {
       const res = await fetch('/api/financial-forecast', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categoryId, budget, scenario })
-        body: JSON.stringify({ categoryId: selectedCategory.id, budget, scenario })
+        body: JSON.stringify({ categoryId: categoryId || selectedCategory.id, budget, scenario })
       });
       const data = await res.json();
       if (data.success) {
@@ -96,16 +95,9 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await fetch('/api/action-checklist', {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
-      });
       const res = await fetch('/api/action-checklist');
       const data = await res.json();
       if (data.success) {
-        // 显示行动清单
-        const checklist = data.data;
-        alert(`✅ 为您准备了 4 周行动清单\n\n${checklist.map(w => `📅 ${w.week}周: ${w.tasks.join('、')}`).join('\n\n')}`);
         const normalized = (data.data || []).map((w) => ({
           ...w,
           items: w.items || w.tasks || []
@@ -154,7 +146,6 @@ export default function App() {
                   borderRadius: '8px',
                   fontSize: '16px'
                 }}
-                style={{ width: '100%', padding: '12px', border: '1px solid #d1d5db', borderRadius: '8px', fontSize: '16px' }}
               />
               <p style={{ fontSize: '12px', color: '#6b7280', margin: '8px 0 0 0' }}>建议 1-2 万元</p>
             </div>
@@ -195,7 +186,6 @@ export default function App() {
                 fontWeight: '600',
                 cursor: 'pointer'
               }}
-              style={{ width: '100%', padding: '12px', background: '#10b981', color: 'white', border: 'none', borderRadius: '8px', fontSize: '16px', fontWeight: '600', cursor: 'pointer' }}
             >
               下一步：选择品类
             </button>
@@ -205,8 +195,6 @@ export default function App() {
         {/* Step 2: 品类推荐 */}
         {step === 2 && (
           <div style={{ background: 'white', padding: '32px', borderRadius: '12px', boxShadow: '0 1px 3px rgba(0,0,0,0.1)' }}>
-            <h2 style={{ marginTop: 0 }}>步骤 2: 选择品类</h2>
-            <p style={{ color: '#6b7280', marginBottom: '20px' }}>我们为你推荐了 20 个高潜力品类，按风险等级分类</p>
             <h2 style={{ marginTop: 0 }}>步骤 2: 交互筛选品类</h2>
             <p style={{ color: '#6b7280', marginBottom: '20px' }}>基于渠道和风险偏好动态筛选候选品类，再进入场景预测</p>
 
@@ -286,7 +274,6 @@ export default function App() {
                 borderRadius: '8px',
                 cursor: 'pointer'
               }}
-              style={{ marginTop: '24px', padding: '12px 24px', border: '1px solid #d1d5db', background: 'white', borderRadius: '8px', cursor: 'pointer' }}
             >
               ← 返回
             </button>
@@ -308,7 +295,6 @@ export default function App() {
                     setScenario(sc);
                     generateForecast(selectedCategory.id);
                   }}
-                  onClick={() => setScenario(sc)}
                   style={{
                     padding: '16px',
                     border: scenario === sc ? '2px solid #10b981' : '1px solid #d1d5db',
@@ -337,7 +323,7 @@ export default function App() {
                 ← 返回重选品类
               </button>
               <button
-                onClick={generateForecast}
+                onClick={() => generateForecast(selectedCategory.id)}
                 disabled={loading}
                 style={{ padding: '12px', background: loading ? '#d1d5db' : '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600' }}
               >
@@ -413,14 +399,6 @@ export default function App() {
             {/* 行动按钮 */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <button
-                onClick={() => { setStep(2); setSelectedCategory(null); }}
-                style={{
-                  padding: '12px',
-                  border: '1px solid #d1d5db',
-                  background: 'white',
-                  borderRadius: '8px',
-                  cursor: 'pointer',
-                  fontWeight: '600'
                 onClick={() => {
                   setForecast(null);
                   setStep(2);
@@ -432,18 +410,8 @@ export default function App() {
               <button
                 onClick={handleStartPlan}
                 disabled={loading}
-                style={{
-                  padding: '12px',
-                  background: loading ? '#d1d5db' : '#10b981',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  fontWeight: '600'
-                }}
                 style={{ padding: '12px', background: loading ? '#d1d5db' : '#10b981', color: 'white', border: 'none', borderRadius: '8px', cursor: loading ? 'not-allowed' : 'pointer', fontWeight: '600' }}
               >
-                {loading ? '⏳ 生成中...' : '✓ 开始执行计划'}
                 {loading ? '⏳ 生成中...' : '✓ 打开执行计划面板'}
               </button>
             </div>
@@ -451,7 +419,7 @@ export default function App() {
         )}
       </main>
 
-      {/* Footer */}
+      {/* Checklist Modal */}
       {showChecklist && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px', zIndex: 1000 }}>
           <div style={{ width: 'min(760px, 100%)', maxHeight: '85vh', overflow: 'auto', background: 'white', borderRadius: '12px', padding: '24px' }}>
@@ -478,7 +446,6 @@ export default function App() {
       )}
 
       <footer style={{ background: '#f3f4f6', padding: '24px', marginTop: '48px', borderTop: '1px solid #e5e7eb', color: '#6b7280', textAlign: 'center', fontSize: '12px' }}>
-        <p>诸葛选品 v1.0 | 所有分析基于亚马逊、淘宝、TEMU、1688 等真实数据</p>
         <p>诸葛选品 v1.1 | 交互式筛选 + 分步预测 + 执行面板</p>
       </footer>
     </div>
