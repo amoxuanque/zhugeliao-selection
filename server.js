@@ -918,7 +918,17 @@ app.get('/api', (req, res) => {
 
 // SPA catch-all 路由（为前端提供 index.html）
 app.get('*', (req, res) => {
-  res.sendFile(join(__dirname, 'frontend', 'dist', 'index.html'));
+  try {
+    res.sendFile(join(__dirname, 'frontend', 'dist', 'index.html'));
+  } catch (err) {
+    // 如果前端文件不存在，返回 API 响应
+    res.status(200).json({
+      ok: true,
+      service: 'zhugeliao-selection',
+      message: 'Frontend not built yet',
+      timestamp: new Date().toISOString()
+    });
+  }
 });
 
 // 错误处理
