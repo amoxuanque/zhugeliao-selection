@@ -13,8 +13,14 @@ const PORT = process.env.PORT || process.env.SERVER_PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-// 提供前端静态文件
-app.use(express.static(join(__dirname, 'frontend', 'dist')));
+// 根路由（API 响应）
+app.get('/', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'zhugeliao-selection',
+    timestamp: new Date().toISOString()
+  });
+});
 
 // 品类库数据（20 个高潜力品类）
 const categoryLibrary = [
@@ -905,31 +911,6 @@ app.get('/api/risk-warnings', (req, res) => {
 // 健康检查
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
-});
-
-// API 根路由
-app.get('/api', (req, res) => {
-  res.status(200).json({
-    ok: true,
-    service: 'zhugeliao-selection',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// SPA catch-all 路由（为前端提供 index.html）
-app.get('*', (req, res) => {
-  const distPath = join(__dirname, 'dist', 'index.html');
-  res.sendFile(distPath, (err) => {
-    if (err) {
-      // 如果前端文件不存在或其他错误，返回 API 响应
-      res.status(200).json({
-        ok: true,
-        service: 'zhugeliao-selection',
-        message: 'API 服务正常运行',
-        timestamp: new Date().toISOString()
-      });
-    }
-  });
 });
 
 // 错误处理
