@@ -913,6 +913,14 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// 静态文件服务 - 提供前端构建的文件
+app.use(express.static(join(__dirname, 'dist')));
+
+// Catch-all 路由 - 所有未匹配的路由都返回 index.html（用于 SPA 路由）
+app.get('*', (req, res) => {
+  res.sendFile(join(__dirname, 'dist', 'index.html'));
+});
+
 // 错误处理
 app.use((err, req, res, next) => {
   console.error(err);
