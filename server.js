@@ -13,14 +13,8 @@ const PORT = process.env.PORT || process.env.SERVER_PORT || 8080;
 app.use(cors());
 app.use(express.json());
 
-// 根路由健康检查
-app.get('/', (req, res) => {
-  res.status(200).json({
-    ok: true,
-    service: 'zhugeliao-selection',
-    timestamp: new Date().toISOString()
-  });
-});
+// 提供前端静态文件
+app.use(express.static(join(__dirname, 'frontend', 'dist')));
 
 // 品类库数据（20 个高潜力品类）
 const categoryLibrary = [
@@ -911,6 +905,20 @@ app.get('/api/risk-warnings', (req, res) => {
 // 健康检查
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// API 根路由
+app.get('/api', (req, res) => {
+  res.status(200).json({
+    ok: true,
+    service: 'zhugeliao-selection',
+    timestamp: new Date().toISOString()
+  });
+});
+
+// SPA catch-all 路由（为前端提供 index.html）
+app.get('*', (req, res) => {
+  res.sendFile(join(__dirname, 'frontend', 'dist', 'index.html'));
 });
 
 // 错误处理
