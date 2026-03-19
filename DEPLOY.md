@@ -30,7 +30,13 @@ git push -u origin main
 3. 选择 "Create Project"
 4. 选择 "Deploy from GitHub"
 5. 选择 `zhugeliao-selection` 仓库
-6. Zeabur 会自动检测配置并部署
+6. Zeabur 会优先使用仓库中的 `Dockerfile` 进行部署
+7. 如果不走 Docker 部署，则会读取 `zbpack.json`，执行 `npm run build` 后再 `npm start`
+
+## 注意事项
+
+- Zeabur 不读取 `docker-compose.yml`，所以端口和启动命令要以 `Dockerfile` 或 `zbpack.json` 为准
+- 首页依赖前端构建产物 `dist/`，如果没先构建，服务虽然能启动，但不会返回正式页面
 
 ## 预期上线时间
 

@@ -1,23 +1,30 @@
-FROM node:18-alpine
+FROM node:20-alpine AS builder
 LABEL "language"="nodejs"
-LABEL "framework"="react"
 WORKDIR /app
 
-# 先复制所有文件
-COPY . .
+COPY package*.json ./
+RUN npm ci
 
-# 安装根目录依赖
+COPY frontend/package*.json ./frontend/
+WORKDIR /app/frontend
 RUN npm install
 
-# 进入前端目录并安装依赖
-WORKDIR /app/frontend
-RUN npm install --include=dev
-
-# 构建前端
+WORKDIR /app
+COPY . .
 RUN npm run build
 
-# 回到根目录
+FROM node:20-alpine AS runner
 WORKDIR /app
+
+ENV NODE_ENV=production
+ENV PORT=8080
+ENV HOST=0.0.0.0
+
+COPY package*.json ./
+RUN npm ci --omit=dev
+
+COPY --from=builder /app/server.js ./server.js
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 8080
 

@@ -43,8 +43,9 @@ export TAVILY_API_KEY=your_tavily_key
 ## 部署到 Zeabur
 
 1. 连接 GitHub 仓库
-2. Zeabur 会自动检测 `zeabur.json` 配置
-3. 自动部署 Node.js 应用
+2. Zeabur 会优先使用仓库里的 `Dockerfile` 进行部署
+3. 如果改用 Node.js 构建方式，则会读取仓库里的 `zbpack.json`
+4. 首次部署前请确认执行过 `npm run build`，或让平台在构建阶段执行该命令
 
 ## 数据说明
 

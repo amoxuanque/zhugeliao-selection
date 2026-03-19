@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 
@@ -8,16 +9,20 @@ const __dirname = dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || process.env.SERVER_PORT || 8080;
+const distDir = join(__dirname, 'dist');
+const distIndexPath = join(distDir, 'index.html');
+const hasFrontendDist = existsSync(distIndexPath);
 
 // Middleware
 app.use(cors());
 app.use(express.json());
 
-// 根路由（API 响应）
-app.get('/', (req, res) => {
+// 服务状态
+app.get('/api/status', (req, res) => {
   res.status(200).json({
     ok: true,
     service: 'zhugeliao-selection',
+    frontendBuilt: hasFrontendDist,
     timestamp: new Date().toISOString()
   });
 });
@@ -910,16 +915,33 @@ app.get('/api/risk-warnings', (req, res) => {
 
 // 健康检查
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    frontendBuilt: hasFrontendDist,
+    timestamp: new Date().toISOString()
+  });
 });
 
-// 静态文件服务 - 提供前端构建的文件
-app.use(express.static(join(__dirname, 'dist')));
+if (hasFrontendDist) {
+  // 静态文件服务 - 提供前端构建的文件
+  app.use(express.static(distDir));
 
-// Catch-all 路由 - 所有未匹配的路由都返回 index.html（用于 SPA 路由）
-app.get('*', (req, res) => {
-  res.sendFile(join(__dirname, 'dist', 'index.html'));
-});
+  // Catch-all 路由 - 所有未匹配的路由都返回 index.html（用于 SPA 路由）
+  app.get('*', (req, res) => {
+    res.sendFile(distIndexPath);
+  });
+} else {
+  // 在构建产物不存在时仍返回 200，避免部署平台把服务判定为不可用。
+  app.get('/', (req, res) => {
+    res.status(200).json({
+      ok: true,
+      service: 'zhugeliao-selection',
+      frontendBuilt: false,
+      message: 'Frontend build not found. Run `npm run build` before deployment.',
+      timestamp: new Date().toISOString()
+    });
+  });
+}
 
 // 错误处理
 app.use((err, req, res, next) => {
@@ -933,5 +955,6 @@ app.use((err, req, res, next) => {
 
 // 启动服务器
 app.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 诸葛选品 Backend 运行在 http://0.0.0.0:${PORT}`);
+  console.log(`🚀 诸葛选品运行在 http://0.0.0.0:${PORT}`);
+  console.log(`📦 Frontend dist ${hasFrontendDist ? 'detected' : 'missing'} at ${distDir}`);
 });
